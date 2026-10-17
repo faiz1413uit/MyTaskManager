@@ -7,43 +7,144 @@ datasource db {
   provider = "postgresql"
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model tasks {
-  id                      Int           @id @default(autoincrement())
-  user_id                 BigInt
-  title                   String        @db.VarChar(255)
-  description             String?
-  due_date                DateTime?     @db.Timestamptz(6)
-  priority                task_priority @default(MEDIUM)
-  status                  task_status   @default(PENDING)
-  is_notification_enabled Boolean       @default(true)
-  completed_at            DateTime?     @db.Timestamptz(6)
-  created_at              DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime      @default(now()) @db.Timestamptz(6)
-  users                   users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+model Task {
+  id                    Int                @id @default(autoincrement())
+  userId                BigInt             @map("user_id")
+  title                 String             @db.VarChar(255)
+  description           String?
+  dueAt                 DateTime?          @map("due_date") @db.Timestamptz(6)
+  priority              TaskPriority       @default(MEDIUM)
+  status                TaskStatus         @default(PENDING)
+  isNotificationEnabled Boolean            @default(true) @map("is_notification_enabled")
+  completedAt           DateTime?          @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reminderAt            DateTime?          @map("reminder_at") @db.Timestamptz(6)
+  reminderSentAt        DateTime?          @map("reminder_sent_at") @db.Timestamptz(6)
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  reminderDeliveries    ReminderDelivery[]
+  notifications         Notification[]
+
+  @@index([userId, status, dueAt])
+  @@index([userId, dueAt])
+  @@map("tasks")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model users {
-  id         BigInt   @id @default(autoincrement())
-  name       String   @db.VarChar(100)
-  email      String   @unique @db.VarChar(255)
-  mobile     String?  @db.VarChar(20)
-  password   String
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  updated_at DateTime @default(now()) @db.Timestamptz(6)
-  tasks      tasks[]
+model User {
+  id                 BigInt             @id @default(autoincrement())
+  name               String             @db.VarChar(100)
+  email              String             @unique @db.VarChar(255)
+  mobile             String?            @db.VarChar(20)
+  passwordHash       String             @map("password")
+  isActive           Boolean            @default(true) @map("is_active")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  theme              UserTheme          @default(SYSTEM)
+  timezone           String             @default("UTC") @db.VarChar(64)
+  inAppNotifications Boolean            @default(true) @map("in_app_notifications")
+  pushNotifications  Boolean            @default(false) @map("push_notifications")
+  sessions           Session[]
+  tasks              Task[]
+  pushSubscriptions  PushSubscription[]
+  notifications      Notification[]
+
+  @@map("users")
 }
 
-enum task_priority {
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique @map("token_hash") @db.VarChar(64)
+  userId    BigInt   @map("user_id")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    BigInt   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model ReminderDelivery {
+  id            BigInt         @id @default(autoincrement())
+  taskId        Int            @map("task_id")
+  reminderAt    DateTime       @map("reminder_at") @db.Timestamptz(6)
+  status        ReminderStatus @default(PENDING)
+  attemptCount  Int            @default(0) @map("attempt_count")
+  nextAttemptAt DateTime       @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt      DateTime?      @map("locked_at") @db.Timestamptz(6)
+  submittedAt   DateTime?      @map("submitted_at") @db.Timestamptz(6)
+  lastError     String?        @map("last_error")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, reminderAt])
+  @@index([status, nextAttemptAt])
+  @@map("reminder_deliveries")
+}
+
+model Notification {
+  id         BigInt    @id @default(autoincrement())
+  userId     BigInt    @map("user_id")
+  taskId     Int       @map("task_id")
+  reminderAt DateTime  @map("reminder_at") @db.Timestamptz(6)
+  title      String    @db.VarChar(255)
+  body       String
+  readAt     DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, reminderAt])
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+enum TaskPriority {
   LOW
   MEDIUM
   HIGH
+
+  @@map("task_priority")
 }
 
-enum task_status {
+enum TaskStatus {
   PENDING
   COMPLETED
   CANCELLED
+
+  @@map("task_status")
+}
+
+enum UserTheme {
+  LIGHT
+  DARK
+  SYSTEM
+
+  @@map("user_theme")
+}
+
+enum ReminderStatus {
+  PENDING
+  PROCESSING
+  SUBMITTED
+  FAILED
+  CANCELLED
+
+  @@map("reminder_status")
 }
